@@ -77,6 +77,14 @@ def extract_dialogue_segments(srt_path, video_duration, padding, merge_gap, min_
 
     return merged
 
+def format_size(size_bytes):
+    """格式化文件大小"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.2f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.2f} TB"
+
 def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing"):
     """运行 FFmpeg 并解析进度条"""
     # 强制 FFmpeg 将进度输出到 stdout
@@ -142,6 +150,17 @@ def process_video_and_srt(args):
 
     total_output_duration = sum(end - start for start, end in segments)
     
+    # 如果用户指定了目标大小，自动计算比特率
+    if args.target_size and not args.bitrate:
+        # 目标比特率 (kbps) = (目标大小 MB * 8192) / 时长 s
+        # 减去音频约 128kbps
+        video_bitrate_kbps = (args.target_size * 8192) / total_output_duration - 128
+        if video_bitrate_kbps < 100:
+            video_bitrate_kbps = 100  # 保底比特率
+            print(f"警告: 目标大小过小，已设置为保底比特率 100kbps")
+        args.bitrate = f"{int(video_bitrate_kbps)}k"
+        print(f"根据目标大小 {args.target_size}MB 反推视频比特率: {args.bitrate}")
+
     print(f"\n--- 任务信息 ---")
     print(f"原始视频时长: {video_duration:.2f}s")
     print(f"提取后总时长: {total_output_duration:.2f}s (压缩率: {total_output_duration/video_duration:.1%})")
@@ -231,7 +250,15 @@ def process_video_and_srt(args):
                 '-hwaccel', 'cuda', 
                 '-f', 'concat', '-safe', '0',
                 '-i', concat_file,
-                '-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '24',
+                '-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr',
+            ]
+            # 优先使用 bitrate，如果没有则使用 cq
+            if args.bitrate:
+                ffmpeg_cmd += ['-b:v', args.bitrate]
+            else:
+                ffmpeg_cmd += ['-cq', str(args.cq)]
+            
+            ffmpeg_cmd += [
                 '-pix_fmt', 'yuv420p',
                 '-fps_mode', 'cfr', 
                 '-c:a', 'aac', '-b:a', '128k',
@@ -244,7 +271,15 @@ def process_video_and_srt(args):
                 'ffmpeg', '-y', 
                 '-f', 'concat', '-safe', '0',
                 '-i', concat_file,
-                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                '-c:v', 'libx264', '-preset', 'fast',
+            ]
+            # 优先使用 bitrate，如果没有则使用 crf
+            if args.bitrate:
+                ffmpeg_cmd += ['-b:v', args.bitrate]
+            else:
+                ffmpeg_cmd += ['-crf', str(args.crf)]
+            
+            ffmpeg_cmd += [
                 '-fps_mode', 'cfr',
                 '-c:a', 'aac', '-b:a', '128k',
                 '-af', 'aresample=async=1',
@@ -257,11 +292,16 @@ def process_video_and_srt(args):
         
         # 最终统计
         total_elapsed = time.time() - start_wall_time
+        input_size = os.path.getsize(video_path)
+        output_size = os.path.getsize(output_video)
+        
         print(f"\n--- 任务完成 ---")
-        print(f"最终视频已生成: {output_video}")
+        print(f"最终视频已生成: {output_video} ({format_size(output_size)})")
+        print(f"原始视频大小: {format_size(input_size)}")
+        print(f"体积变化率: {output_size/input_size:.1%}")
         print(f"最终字幕已生成: {output_srt}")
         print(f"总处理耗时: {total_elapsed:.2f}s (FFmpeg: {processing_time:.2f}s)")
-        print(f"处理速度: {total_output_duration/processing_time:.2f}x (输出视频时长/FFmpeg耗时)")
+        print(f"处理速度: {total_output_duration/processing_time:.2f}x")
     except subprocess.CalledProcessError as e:
         print(f"\nFFmpeg 执行失败，返回码: {e.returncode}")
     finally:
@@ -286,6 +326,12 @@ if __name__ == "__main__":
     parser.add_argument("--padding", type=float, default=0.3, help="对白前后扩展时间 (秒, 默认 0.3)")
     parser.add_argument("--merge_gap", type=float, default=0.5, help="合并相邻片段的最大间隔 (秒, 默认 0.5)")
     parser.add_argument("--min_duration", type=float, default=0.5, help="最短字幕过滤阈值 (秒, 默认 0.5)")
+
+    # 质量与体积控制
+    parser.add_argument("--crf", type=int, default=26, help="CPU 模式下的 CRF 质量参数 (18-28, 默认 26, 越大体积越小)")
+    parser.add_argument("--cq", type=int, default=28, help="GPU 模式下的 CQ 质量参数 (默认 28, 越大体积越小)")
+    parser.add_argument("--bitrate", help="目标视频比特率 (如 1M, 2M, 会覆盖 CRF/CQ)")
+    parser.add_argument("--target-size", type=float, help="期望的最终视频文件大小 (MB, 会自动计算比特率)")
 
     args = parser.parse_args()
 
