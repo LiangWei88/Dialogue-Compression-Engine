@@ -2,3 +2,4 @@ myenv
 *.webm
 *.srt
 *.mp4
+__pycache__
