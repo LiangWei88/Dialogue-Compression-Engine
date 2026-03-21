@@ -3,6 +3,8 @@ import sys
 import subprocess
 import pysrt
 import argparse
+import time
+from tqdm import tqdm
 from datetime import timedelta
 
 def get_video_duration(video_path):
@@ -75,7 +77,44 @@ def extract_dialogue_segments(srt_path, video_duration, padding, merge_gap, min_
 
     return merged
 
+def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing"):
+    """运行 FFmpeg 并解析进度条"""
+    # 强制 FFmpeg 将进度输出到 stdout
+    cmd = cmd + ['-progress', '-', '-nostats']
+    
+    # 统计信息
+    start_time = time.time()
+    
+    with tqdm(total=total_duration, desc=desc, unit="s", bar_format='{l_bar}{bar}| {n:.1f}/{total:.1f}s [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
+        process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            text=True, 
+            encoding='utf-8',
+            errors='ignore'
+        )
+        
+        last_time = 0.0
+        for line in process.stdout:
+            if 'out_time_us=' in line:
+                try:
+                    # out_time_us=12345678 (单位是微秒)
+                    curr_time = int(line.split('=')[1]) / 1_000_000.0
+                    if curr_time > last_time:
+                        pbar.update(curr_time - last_time)
+                        last_time = curr_time
+                except (ValueError, IndexError):
+                    pass
+        
+        process.wait()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd)
+            
+    return time.time() - start_time
+
 def process_video_and_srt(args):
+    start_wall_time = time.time()
     video_path = args.input
     srt_path = args.srt
     output_video = args.output
@@ -101,9 +140,13 @@ def process_video_and_srt(args):
         print("未找到有效的对白片段。")
         return
 
+    total_output_duration = sum(end - start for start, end in segments)
+    
+    print(f"\n--- 任务信息 ---")
+    print(f"原始视频时长: {video_duration:.2f}s")
+    print(f"提取后总时长: {total_output_duration:.2f}s (压缩率: {total_output_duration/video_duration:.1%})")
     print(f"共提取到 {len(segments)} 个有效片段。")
-    for i, (s, e) in enumerate(segments):
-        print(f"  片段 {i+1}: {s:.2f}s -> {e:.2f}s (时长: {e-s:.2f}s)")
+    # print(f"  片段 1: {s:.2f}s -> {e:.2f}s (时长: {e-s:.2f}s)") # 移除过多的日志，保持整洁
 
     # 1. 生成新字幕文件
     subs = pysrt.open(srt_path)
@@ -147,7 +190,7 @@ def process_video_and_srt(args):
 
     new_subs.sort()  # 确保字幕索引顺序正确
     new_subs.save(output_srt, encoding='utf-8')
-    print(f"新字幕已生成: {output_srt}")
+    # print(f"新字幕已生成: {output_srt}")
 
     # 2. 生成 ffmpeg concat 脚本并处理视频
     # 再次校验 segments 确保没有逻辑上的重叠
@@ -179,7 +222,7 @@ def process_video_and_srt(args):
             '-fflags', '+genpts',
             output_video
         ]
-        print(f"正在执行无损拼接 (Copy Mode)...")
+        desc = "正在拼接 (Copy Mode)"
     else:
         # 重编码模式
         if args.gpu:
@@ -195,7 +238,7 @@ def process_video_and_srt(args):
                 '-af', 'aresample=async=1',
                 output_video
             ]
-            print(f"正在执行 GPU 加速重编码 (WebM -> MP4)...")
+            desc = "正在重编码 (GPU 加速)"
         else:
             ffmpeg_cmd = [
                 'ffmpeg', '-y', 
@@ -207,13 +250,20 @@ def process_video_and_srt(args):
                 '-af', 'aresample=async=1',
                 output_video
             ]
-            print(f"正在执行 CPU 重编码拼接...")
+            desc = "正在重编码 (CPU 模式)"
     
     try:
-        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        processing_time = run_ffmpeg_with_progress(ffmpeg_cmd, total_output_duration, desc=desc)
+        
+        # 最终统计
+        total_elapsed = time.time() - start_wall_time
+        print(f"\n--- 任务完成 ---")
         print(f"最终视频已生成: {output_video}")
+        print(f"最终字幕已生成: {output_srt}")
+        print(f"总处理耗时: {total_elapsed:.2f}s (FFmpeg: {processing_time:.2f}s)")
+        print(f"处理速度: {total_output_duration/processing_time:.2f}x (输出视频时长/FFmpeg耗时)")
     except subprocess.CalledProcessError as e:
-        print(f"FFmpeg 执行失败: {e.stderr.decode()}")
+        print(f"\nFFmpeg 执行失败，返回码: {e.returncode}")
     finally:
         if os.path.exists(concat_file):
             os.remove(concat_file)
