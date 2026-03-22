@@ -118,8 +118,6 @@ class App(ctk.CTk):
         progress_label_frame.pack(fill="x", anchor="w")
         
         ctk.CTkLabel(progress_label_frame, text="处理进度", font=FONT_LABEL).pack(side="left")
-        self.percentage_label = ctk.CTkLabel(progress_label_frame, text="0%", font=FONT_MAIN, text_color=COLORS["secondary"])
-        self.percentage_label.pack(side="right")
 
         self.progress_bar = ctk.CTkProgressBar(
             bottom_container, 
@@ -182,7 +180,6 @@ class App(ctk.CTk):
     def _update_progress(self, curr, total, desc):
         percent = curr / total if total > 0 else 0
         self.progress_bar.set(percent)
-        self.percentage_label.configure(text=f"{percent:.1%}")
         self.status_label.configure(text=f"{desc}: {percent:.1%}")
 
     def _start_task(self):
@@ -195,7 +192,6 @@ class App(ctk.CTk):
         
         # 初始化进度条
         self.progress_bar.set(0)
-        self.percentage_label.configure(text="0%")
         self._log("任务启动...")
         
         class Args:
