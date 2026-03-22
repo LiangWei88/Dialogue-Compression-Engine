@@ -16,11 +16,11 @@ COLORS = {
     "white": "#FFFFFF"
 }
 
-# --- 字体设置 ---
-FONT_MAIN = ("Microsoft YaHei", 14)
-FONT_BOLD = ("Microsoft YaHei", 14, "bold")
-FONT_TITLE = ("Microsoft YaHei", 28, "bold")
-FONT_LOG = ("Consolas", 12)
+# --- 字体设置 (根据要求调整大小且不加粗) ---
+FONT_MAIN = ("Microsoft YaHei", 16)
+FONT_LABEL = ("Microsoft YaHei", 16)
+FONT_TITLE = ("Microsoft YaHei", 32, "bold") # 标题保留加粗以便区分
+FONT_LOG = ("Consolas", 14)
 
 class App(ctk.CTk):
     def __init__(self):
@@ -28,7 +28,7 @@ class App(ctk.CTk):
         
         # 窗口设置
         self.title("Subtitle-driven Video Extractor")
-        self.geometry("900x900")
+        self.geometry("1100x900")
         # 默认最大化
         self.after(0, lambda: self.state('zoomed'))
         
@@ -54,83 +54,90 @@ class App(ctk.CTk):
         self.main_scroll = ctk.CTkScrollableFrame(self, fg_color=COLORS["bg"], corner_radius=0)
         self.main_scroll.pack(fill="both", expand=True)
 
-        # 标题
+        # 1. 顶部标题
         title_label = ctk.CTkLabel(self.main_scroll, text="视频对白提取工具", font=FONT_TITLE, text_color=COLORS["primary"])
         title_label.pack(pady=(30, 20))
 
-        # 文件路径显示与选择按钮
+        # 2. 文件选择区 (顶部通栏)
         file_container = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
-        file_container.pack(pady=15, padx=40, fill="x")
+        file_container.pack(pady=10, padx=40, fill="x")
 
         # 视频路径
         v_frame = ctk.CTkFrame(file_container, fg_color="transparent")
         v_frame.pack(fill="x", pady=8)
-        ctk.CTkLabel(v_frame, text="视频路径:", width=100, anchor="w", font=FONT_BOLD).pack(side="left")
+        ctk.CTkLabel(v_frame, text="视频路径:", width=100, anchor="w", font=FONT_LABEL).pack(side="left")
         self.v_entry = ctk.CTkEntry(v_frame, textvariable=self.video_path, placeholder_text="请选择要处理的视频文件", font=FONT_MAIN)
         self.v_entry.pack(side="left", fill="x", expand=True, padx=10)
-        ctk.CTkButton(v_frame, text="选择视频", width=120, height=40, font=FONT_BOLD, fg_color=COLORS["primary"], hover_color="#FF8E8E", command=self._browse_video).pack(side="right")
+        ctk.CTkButton(v_frame, text="选择视频", width=130, height=45, font=FONT_MAIN, fg_color=COLORS["primary"], hover_color="#FF8E8E", command=self._browse_video).pack(side="right")
 
         # 字幕路径
         s_frame = ctk.CTkFrame(file_container, fg_color="transparent")
         s_frame.pack(fill="x", pady=8)
-        ctk.CTkLabel(s_frame, text="字幕路径:", width=100, anchor="w", font=FONT_BOLD).pack(side="left")
+        ctk.CTkLabel(s_frame, text="字幕路径:", width=100, anchor="w", font=FONT_LABEL).pack(side="left")
         self.s_entry = ctk.CTkEntry(s_frame, textvariable=self.srt_path, placeholder_text="可选 (默认加载视频同名 SRT)", font=FONT_MAIN)
         self.s_entry.pack(side="left", fill="x", expand=True, padx=10)
-        ctk.CTkButton(s_frame, text="选择字幕", width=120, height=40, font=FONT_BOLD, fg_color=COLORS["primary"], hover_color="#FF8E8E", command=self._browse_srt).pack(side="right")
+        ctk.CTkButton(s_frame, text="选择字幕", width=130, height=45, font=FONT_MAIN, fg_color=COLORS["primary"], hover_color="#FF8E8E", command=self._browse_srt).pack(side="right")
 
-        # 配置参数区
-        param_frame = ctk.CTkFrame(self.main_scroll, fg_color=COLORS["white"], corner_radius=15)
-        param_frame.pack(pady=15, padx=40, fill="x")
+        # 3. 中间核心区: 左右并排 (配置 vs 日志)
+        middle_container = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
+        middle_container.pack(pady=20, padx=40, fill="x")
 
-        # 左右分栏
-        left_p = ctk.CTkFrame(param_frame, fg_color="transparent")
-        left_p.pack(side="left", fill="both", expand=True, padx=25, pady=25)
-        right_p = ctk.CTkFrame(param_frame, fg_color="transparent")
-        right_p.pack(side="right", fill="both", expand=True, padx=25, pady=25)
-
-        # 左侧: 时间参数
-        self._create_slider(left_p, "Padding (秒) - 对白前后缓冲", self.padding, 0.0, 2.0)
-        self._create_slider(left_p, "合并阈值 (秒) - 间隔小于此值则合并", self.merge_gap, 0.1, 2.0)
-        self._create_slider(left_p, "最小长度 (秒) - 过滤掉过短的字幕", self.min_duration, 0.1, 1.0)
-
-        # 右侧: 质量与模式
-        ctk.CTkSwitch(right_p, text="开启 GPU 加速 (NVIDIA)", variable=self.use_gpu, font=FONT_MAIN, progress_color=COLORS["secondary"]).pack(pady=15, anchor="w")
-        ctk.CTkSwitch(right_p, text="无损模式 (Copy) - 极速但可能卡顿", variable=self.use_copy, font=FONT_MAIN, progress_color=COLORS["secondary"]).pack(pady=15, anchor="w")
+        # 左侧: 配置参数
+        self.param_frame = ctk.CTkFrame(middle_container, fg_color=COLORS["white"], corner_radius=15, border_width=1, border_color="#E0E0E0")
+        self.param_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
-        target_size_frame = ctk.CTkFrame(right_p, fg_color="transparent")
-        target_size_frame.pack(fill="x", pady=15)
-        ctk.CTkLabel(target_size_frame, text="目标大小 (MB):", anchor="w", font=FONT_MAIN).pack(side="left")
-        ctk.CTkEntry(target_size_frame, textvariable=self.target_size, width=120, font=FONT_MAIN).pack(side="right")
-
-        # 日志区
-        log_label = ctk.CTkLabel(self.main_scroll, text="处理日志", font=FONT_BOLD)
-        log_label.pack(pady=(15, 5), padx=40, anchor="w")
-        self.log_text = ctk.CTkTextbox(self.main_scroll, height=250, fg_color="#F8F8F8", font=FONT_LOG, border_color="#E0E0E0", border_width=1)
-        self.log_text.pack(pady=10, padx=40, fill="x")
-
-        # 进度条区 (放在日志之后)
-        self.progress_frame = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
-        self.progress_frame.pack(pady=15, padx=40, fill="x")
+        ctk.CTkLabel(self.param_frame, text="⚙️ 参数配置", font=FONT_LABEL, text_color=COLORS["text"]).pack(pady=(15, 10), padx=20, anchor="w")
         
-        self.progress_bar = ctk.CTkProgressBar(self.progress_frame, progress_color=COLORS["secondary"], height=20)
+        # 参数子项
+        self._create_slider(self.param_frame, "Padding (秒) - 对白前后缓冲", self.padding, 0.0, 2.0)
+        self._create_slider(self.param_frame, "合并阈值 (秒) - 间隔合并", self.merge_gap, 0.1, 2.0)
+        self._create_slider(self.param_frame, "最小长度 (秒) - 字幕过滤", self.min_duration, 0.1, 1.0)
+        
+        mode_frame = ctk.CTkFrame(self.param_frame, fg_color="transparent")
+        mode_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkSwitch(mode_frame, text="GPU 加速", variable=self.use_gpu, font=FONT_MAIN, progress_color=COLORS["secondary"]).pack(side="left", padx=(0, 20))
+        ctk.CTkSwitch(mode_frame, text="无损模式", variable=self.use_copy, font=FONT_MAIN, progress_color=COLORS["secondary"]).pack(side="left")
+        
+        target_size_frame = ctk.CTkFrame(self.param_frame, fg_color="transparent")
+        target_size_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(target_size_frame, text="目标大小 (MB):", font=FONT_MAIN).pack(side="left")
+        ctk.CTkEntry(target_size_frame, textvariable=self.target_size, width=120, font=FONT_MAIN).pack(side="left", padx=10)
+
+        # 右侧: 处理日志
+        self.log_container = ctk.CTkFrame(middle_container, fg_color=COLORS["white"], corner_radius=15, border_width=1, border_color="#E0E0E0")
+        self.log_container.pack(side="right", fill="both", expand=True, padx=(10, 0))
+        
+        ctk.CTkLabel(self.log_container, text="📝 处理日志", font=FONT_LABEL, text_color=COLORS["text"]).pack(pady=(15, 5), padx=20, anchor="w")
+        self.log_text = ctk.CTkTextbox(self.log_container, height=300, fg_color="#F8F8F8", font=FONT_LOG, border_width=0)
+        self.log_text.pack(pady=10, padx=20, fill="both", expand=True)
+
+        # 4. 底部区: 进度条与按钮
+        bottom_container = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
+        bottom_container.pack(pady=20, padx=40, fill="x")
+
+        # 进度条
+        self.progress_bar = ctk.CTkProgressBar(bottom_container, progress_color=COLORS["secondary"], height=25)
         self.progress_bar.set(0)
-        self.progress_bar.pack(fill="x", pady=8)
+        self.progress_bar.pack(fill="x", pady=10)
         
-        self.status_label = ctk.CTkLabel(self.progress_frame, text="就绪", font=FONT_BOLD, text_color=COLORS["text"])
-        self.status_label.pack()
+        self.status_label = ctk.CTkLabel(bottom_container, text="就绪", font=FONT_MAIN, text_color=COLORS["text"])
+        self.status_label.pack(pady=(0, 20))
 
         # 运行按钮
-        self.run_btn = ctk.CTkButton(self.main_scroll, text="开始处理", height=65, font=("Microsoft YaHei", 22, "bold"), 
-                                     fg_color=COLORS["primary"], hover_color="#FF8E8E", corner_radius=32, command=self._start_task)
-        self.run_btn.pack(pady=30, padx=40, fill="x")
+        self.run_btn = ctk.CTkButton(bottom_container, text="开始处理", height=75, font=("Microsoft YaHei", 24, "bold"), 
+                                     fg_color=COLORS["primary"], hover_color="#FF8E8E", corner_radius=38, command=self._start_task)
+        self.run_btn.pack(fill="x")
 
     def _create_slider(self, parent, label, var, start, end):
         f = ctk.CTkFrame(parent, fg_color="transparent")
-        f.pack(fill="x", pady=10)
+        f.pack(fill="x", padx=20, pady=8)
         ctk.CTkLabel(f, text=label, font=FONT_MAIN).pack(side="top", anchor="w")
-        s = ctk.CTkSlider(f, from_=start, to=end, variable=var, button_color=COLORS["primary"], progress_color=COLORS["secondary"])
-        s.pack(side="left", fill="x", expand=True, pady=5)
-        ctk.CTkLabel(f, textvariable=var, width=60, font=FONT_BOLD).pack(side="right", padx=5)
+        
+        s_row = ctk.CTkFrame(f, fg_color="transparent")
+        s_row.pack(fill="x", pady=2)
+        s = ctk.CTkSlider(s_row, from_=start, to=end, variable=var, button_color=COLORS["primary"], progress_color=COLORS["secondary"])
+        s.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(s_row, textvariable=var, width=60, font=FONT_MAIN).pack(side="right", padx=(10, 0))
 
     def _browse_video(self):
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.webm *.mkv *.mov *.avi *.flv *.ts")])
@@ -140,7 +147,7 @@ class App(ctk.CTk):
             if os.path.exists(base + ".srt"):
                 self.srt_path.set(base + ".srt")
             else:
-                self.srt_path.set("") # 清空之前的选择
+                self.srt_path.set("")
 
     def _browse_srt(self):
         p = filedialog.askopenfilename(filetypes=[("Subtitle files", "*.srt")])
@@ -165,14 +172,13 @@ class App(ctk.CTk):
         self.progress_bar.set(0)
         self._log("任务启动...")
         
-        # 构建类似 argparse 的对象
         class Args:
             pass
         
         args = Args()
         args.input = self.video_path.get()
         args.srt = self.srt_path.get()
-        args.output = None # 触发 main.py 的 [Dialogue-Only] 命名逻辑
+        args.output = None 
         args.output_srt = None
         args.padding = self.padding.get()
         args.merge_gap = self.merge_gap.get()
