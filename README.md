@@ -7,12 +7,10 @@
 - **智能提取**：根据 SRT 字幕时间轴自动提取对白片段。
 - **自动合并**：智能合并间隔较短（如 < 0.5s）的片段，避免视频过度碎片化。
 - **时间轴重构**：自动计算并映射新视频的字幕时间，确保音画字同步。
+- **智能命名**：默认输出文件名为 `[Dialogue-Only] 原文件名.mp4`，保存于原视频同目录下。
 - **实时进度**：集成 `tqdm` 进度条，实时显示处理进度及预估剩余时间。
-- **统计报告**：任务结束后自动统计压缩率、处理耗时及处理速度。
+- **时间统计**：任务结束后自动统计原始时长、压缩后时长及节省比例。
 - **GPU 加速**：支持 NVIDIA GPU (NVENC) 加速重编码，处理长视频更高效。
-- **多种模式**：
-  - **重编码模式 (默认)**：解决 WebM/VFR 导致的时间轴卡顿，切割精确。
-  - **无损拷贝模式 (`--copy`)**：速度极快，但不保证所有播放器兼容性。
 
 ## 环境要求
 
@@ -20,38 +18,22 @@
 2. **FFmpeg**: 系统需安装 `ffmpeg` 和 `ffprobe` 并添加到环境变量。
 3. **依赖库**:
    ```bash
-   pip install pysrt
+   pip install pysrt customtkinter
    ```
 
 ## 快速上手
 
-最简单的使用方式（脚本会自动在同目录下寻找同名的 `.srt` 文件）：
+### 1. GUI 图形界面 (推荐)
+提供现代扁平化“多巴胺”配色界面，操作直观简单。
 
+```bash
+python gui.py
+```
+
+### 2. 命令行模式
 ```bash
 python main.py video.mp4
 ```
-
-### 常用命令示例
-
-1. **指定字幕和输出文件名**：
-   ```bash
-   python main.py my_video.webm --srt my_video.srt -o final.mp4 --output_srt final.srt
-   ```
-
-2. **使用无损拷贝模式（速度最快，适合标准 MP4）**：
-   ```bash
-   python main.py video.mp4 --copy
-   ```
-
-3. **禁用 GPU 加速（使用 CPU 重编码）**：
-   ```bash
-   python main.py video.mp4 --no-gpu
-   ```
-
-4. **调整对白前后缓冲时间（Padding）**：
-   ```bash
-   python main.py video.mp4 --padding 0.5
-   ```
 
 ## 参数说明
 
@@ -59,14 +41,14 @@ python main.py video.mp4
 | :--- | :--- | :--- | :--- |
 | `input` | - | 必填 | 输入视频文件路径 |
 | `--srt` | - | 同名.srt | 输入字幕文件路径 |
-| `--output` | `-o` | `output.mp4` | 输出视频文件名 |
-| `--output_srt` | - | `output.srt` | 输出字幕文件名 |
+| `--output` | `-o` | 自动 | 输出视频文件名 (默认加 `[Dialogue-Only]` 前缀) |
+| `--output_srt` | - | 自动 | 输出字幕文件名 (默认加 `[Dialogue-Only]` 前缀) |
 | `--copy` | - | False | 是否开启无损拷贝（不重编码） |
 | `--no-gpu` | - | GPU开启 | 禁用 NVIDIA GPU 硬件加速 |
 | `--crf` | - | `26` | CPU 质量参数 (18-28，越大体积越小，质量越低) |
 | `--cq` | - | `28` | GPU 质量参数 (越大体积越小) |
 | `--bitrate` | - | None | 强制指定比特率 (如 `1M`, `800k`) |
-| `--target-size` | - | None | 期望的最终文件大小 (以MB为单位纯数字)，脚本会自动反推比特率 |
+| `--target-size` | - | None | 期望的最终文件大小 (MB)，脚本会自动反推比特率 |
 | `--padding` | - | `0.3` | 每个片段前后增加的缓冲时间（秒） |
 | `--merge_gap` | - | `0.5` | 小于该间隔的片段将自动合并（秒） |
 | `--min_duration`| - | `0.5` | 过滤掉时长短于此值的字幕（秒） |
@@ -75,10 +57,8 @@ python main.py video.mp4
 
 - **输出文件比原视频还大**：
   - 原因是默认的编码质量可能高于原片（尤其是原片是高压缩率的 WebM/AV1 时）。
-  - **解决方法**：调大 `--crf` (如 `--crf 30`) 或手动限制比特率 (如 `--bitrate 1M`)。
+  - **解决方法**：调大 `--crf` (如 `--crf 30`) 或手动设置 `--target-size` (如 `--target-size 50`)。
 - **视频在拼接处卡顿**：
   - 这是由于原始视频（如 WebM）关键帧稀疏导致的。**请不要使用 `--copy` 参数**，使用默认的重编码模式即可解决。
 - **GPU 报错 (NVENC error)**：
   - 如果你的电脑没有 NVIDIA 显卡或 FFmpeg 版本不支持 NVENC，请加上 `--no-gpu` 参数切换回 CPU 模式。
-- **时间轴不准**：
-  - 脚本默认使用 `aresample=async=1` 强制同步音画。如果仍有问题，请检查原始 SRT 字幕本身的时间轴是否准确。

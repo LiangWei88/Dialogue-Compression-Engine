@@ -85,7 +85,7 @@ def format_size(size_bytes):
         size_bytes /= 1024.0
     return f"{size_bytes:.2f} TB"
 
-def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing"):
+def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing", progress_callback=None):
     """运行 FFmpeg 并解析进度条"""
     # 强制 FFmpeg 将进度输出到 stdout
     cmd = cmd + ['-progress', '-', '-nostats']
@@ -93,35 +93,45 @@ def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing"):
     # 统计信息
     start_time = time.time()
     
-    with tqdm(total=total_duration, desc=desc, unit="s", bar_format='{l_bar}{bar}| {n:.1f}/{total:.1f}s [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
-        process = subprocess.Popen(
-            cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True, 
-            encoding='utf-8',
-            errors='ignore'
-        )
-        
-        last_time = 0.0
-        for line in process.stdout:
-            if 'out_time_us=' in line:
-                try:
-                    # out_time_us=12345678 (单位是微秒)
-                    curr_time = int(line.split('=')[1]) / 1_000_000.0
-                    if curr_time > last_time:
+    process = subprocess.Popen(
+        cmd, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT, 
+        text=True, 
+        encoding='utf-8',
+        errors='ignore'
+    )
+    
+    last_time = 0.0
+    # 如果没有 GUI callback，使用 tqdm 命令行进度条
+    pbar = None
+    if not progress_callback:
+        pbar = tqdm(total=total_duration, desc=desc, unit="s", bar_format='{l_bar}{bar}| {n:.1f}/{total:.1f}s [{elapsed}<{remaining}, {rate_fmt}]')
+
+    for line in process.stdout:
+        if 'out_time_us=' in line:
+            try:
+                # out_time_us=12345678 (单位是微秒)
+                curr_time = int(line.split('=')[1]) / 1_000_000.0
+                if curr_time > last_time:
+                    if progress_callback:
+                        progress_callback(curr_time, total_duration, desc)
+                    if pbar:
                         pbar.update(curr_time - last_time)
-                        last_time = curr_time
-                except (ValueError, IndexError):
-                    pass
+                    last_time = curr_time
+            except (ValueError, IndexError):
+                pass
+    
+    process.wait()
+    if pbar:
+        pbar.close()
         
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, cmd)
-            
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, cmd)
+        
     return time.time() - start_time
 
-def process_video_and_srt(args):
+def process_video_and_srt(args, progress_callback=None, logger=print):
     start_wall_time = time.time()
     video_path = args.input
     srt_path = args.srt
@@ -134,71 +144,68 @@ def process_video_and_srt(args):
         possible_srt = base_name + ".srt"
         if os.path.exists(possible_srt):
             srt_path = possible_srt
-            print(f"检测到同名字幕文件: {srt_path}")
+            logger(f"检测到同名字幕文件: {srt_path}")
         else:
-            print(f"错误: 未提供字幕文件，且未找到同名 .srt 文件 ({possible_srt})")
-            return
+            logger(f"错误: 未提供字幕文件，且未找到同名 .srt 文件 ({possible_srt})")
+            return None
+
+    # 统一命名逻辑：如果未指定输出名，则使用 [Dialogue-Only] 前缀
+    input_dir = os.path.dirname(video_path)
+    input_filename = os.path.basename(video_path)
+    input_base = os.path.splitext(input_filename)[0]
+    
+    if not output_video or output_video == "output.mp4":
+        output_video = os.path.join(input_dir, f"[Dialogue-Only] {input_base}.mp4")
+    
+    if not output_srt or output_srt == "output.srt":
+        output_srt = os.path.join(input_dir, f"[Dialogue-Only] {input_base}.srt")
 
     video_duration = get_video_duration(video_path)
     if video_duration is None:
-        return
+        return None
 
     segments = extract_dialogue_segments(srt_path, video_duration, args.padding, args.merge_gap, args.min_duration)
     if not segments:
-        print("未找到有效的对白片段。")
-        return
+        logger("未找到有效的对白片段。")
+        return None
 
     total_output_duration = sum(end - start for start, end in segments)
     
     # 如果用户指定了目标大小，自动计算比特率
-    if args.target_size and not args.bitrate:
-        # 目标比特率 (kbps) = (目标大小 MB * 8192) / 时长 s
-        # 减去音频约 128kbps
+    if hasattr(args, 'target_size') and args.target_size and not args.bitrate:
         video_bitrate_kbps = (args.target_size * 8192) / total_output_duration - 128
         if video_bitrate_kbps < 100:
-            video_bitrate_kbps = 100  # 保底比特率
-            print(f"警告: 目标大小过小，已设置为保底比特率 100kbps")
+            video_bitrate_kbps = 100
+            logger(f"警告: 目标大小过小，已设置为保底比特率 100kbps")
         args.bitrate = f"{int(video_bitrate_kbps)}k"
-        print(f"根据目标大小 {args.target_size}MB 反推视频比特率: {args.bitrate}")
+        logger(f"根据目标大小 {args.target_size}MB 反推视频比特率: {args.bitrate}")
 
-    print(f"\n--- 任务信息 ---")
-    print(f"原始视频时长: {video_duration:.2f}s")
-    print(f"提取后总时长: {total_output_duration:.2f}s (压缩率: {total_output_duration/video_duration:.1%})")
-    print(f"共提取到 {len(segments)} 个有效片段。")
-    # print(f"  片段 1: {s:.2f}s -> {e:.2f}s (时长: {e-s:.2f}s)") # 移除过多的日志，保持整洁
+    logger(f"\n--- 任务信息 ---")
+    logger(f"原始视频时长: {video_duration:.2f}s")
+    logger(f"提取后总时长: {total_output_duration:.2f}s (时间压缩率: {total_output_duration/video_duration:.1%})")
+    logger(f"共提取到 {len(segments)} 个有效片段。")
 
     # 1. 生成新字幕文件
     subs = pysrt.open(srt_path)
     new_subs = pysrt.SubRipFile()
     
-    # 预计算每个片段在新视频中的开始时间 (cumulative_offset)
     segment_offsets = []
     current_offset = 0.0
     for start, end in segments:
         segment_offsets.append(current_offset)
         current_offset += (end - start)
 
-    # 重映射字幕时间轴
     for sub in subs:
         sub_start = srt_to_seconds(sub.start)
         sub_end = srt_to_seconds(sub.end)
-        
-        # 过滤空字幕或过短片段 (需与提取逻辑一致)
         if not sub.text.strip() or (sub_end - sub_start) < args.min_duration:
             continue
-            
-        # 查找该字幕落在哪个片段内（可能跨越，按要求裁剪）
         for i, (seg_start, seg_end) in enumerate(segments):
-            # 检查是否有重叠部分
             overlap_start = max(sub_start, seg_start)
             overlap_end = min(sub_end, seg_end)
-            
             if overlap_start < overlap_end:
-                # 存在重叠，进行重映射
                 new_start_sec = overlap_start - seg_start + segment_offsets[i]
                 new_end_sec = overlap_end - seg_start + segment_offsets[i]
-                
-                # 创建新字幕条目（保持原文本）
                 new_sub = pysrt.SubRipItem(
                     index=len(new_subs) + 1,
                     start=seconds_to_srt_time(new_start_sec),
@@ -207,15 +214,11 @@ def process_video_and_srt(args):
                 )
                 new_subs.append(new_sub)
 
-    new_subs.sort()  # 确保字幕索引顺序正确
+    new_subs.sort()
     new_subs.save(output_srt, encoding='utf-8')
-    # print(f"新字幕已生成: {output_srt}")
 
-    # 2. 生成 ffmpeg concat 脚本并处理视频
-    # 再次校验 segments 确保没有逻辑上的重叠
     for i in range(len(segments) - 1):
         if segments[i][1] > segments[i+1][0]:
-            # 强制修正（防御性编程）
             segments[i+1] = (segments[i][1] + 0.001, segments[i+1][1])
 
     concat_file = "ffmpeg_concat.txt"
@@ -226,12 +229,9 @@ def process_video_and_srt(args):
             f.write(f"inpoint {start:.3f}\n")
             f.write(f"outpoint {end:.3f}\n")
 
-    # 执行 ffmpeg 拼接
     if args.copy:
-        # 无损拷贝模式
         if video_path.lower().endswith('.webm') and output_video.lower().endswith('.mp4'):
-            print("警告: 正在将 WebM 无损拷贝至 MP4，这可能导致播放错误。建议使用默认重编码模式。")
-        
+            logger("警告: 正在将 WebM 无损拷贝至 MP4，这可能导致播放错误。建议使用默认重编码模式。")
         ffmpeg_cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
             '-segment_time_metadata', '1',
@@ -243,7 +243,6 @@ def process_video_and_srt(args):
         ]
         desc = "正在拼接 (Copy Mode)"
     else:
-        # 重编码模式
         if args.gpu:
             ffmpeg_cmd = [
                 'ffmpeg', '-y', 
@@ -252,12 +251,10 @@ def process_video_and_srt(args):
                 '-i', concat_file,
                 '-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr',
             ]
-            # 优先使用 bitrate，如果没有则使用 cq
             if args.bitrate:
                 ffmpeg_cmd += ['-b:v', args.bitrate]
             else:
                 ffmpeg_cmd += ['-cq', str(args.cq)]
-            
             ffmpeg_cmd += [
                 '-pix_fmt', 'yuv420p',
                 '-fps_mode', 'cfr', 
@@ -273,12 +270,10 @@ def process_video_and_srt(args):
                 '-i', concat_file,
                 '-c:v', 'libx264', '-preset', 'fast',
             ]
-            # 优先使用 bitrate，如果没有则使用 crf
             if args.bitrate:
                 ffmpeg_cmd += ['-b:v', args.bitrate]
             else:
                 ffmpeg_cmd += ['-crf', str(args.crf)]
-            
             ffmpeg_cmd += [
                 '-fps_mode', 'cfr',
                 '-c:a', 'aac', '-b:a', '128k',
@@ -288,54 +283,52 @@ def process_video_and_srt(args):
             desc = "正在重编码 (CPU 模式)"
     
     try:
-        processing_time = run_ffmpeg_with_progress(ffmpeg_cmd, total_output_duration, desc=desc)
-        
-        # 最终统计
+        processing_time = run_ffmpeg_with_progress(ffmpeg_cmd, total_output_duration, desc=desc, progress_callback=progress_callback)
         total_elapsed = time.time() - start_wall_time
-        input_size = os.path.getsize(video_path)
-        output_size = os.path.getsize(output_video)
         
-        print(f"\n--- 任务完成 ---")
-        print(f"最终视频已生成: {output_video} ({format_size(output_size)})")
-        print(f"原始视频大小: {format_size(input_size)}")
-        print(f"体积变化率: {output_size/input_size:.1%}")
-        print(f"最终字幕已生成: {output_srt}")
-        print(f"总处理耗时: {total_elapsed:.2f}s (FFmpeg: {processing_time:.2f}s)")
-        print(f"处理速度: {total_output_duration/processing_time:.2f}x")
+        stats = {
+            "output_video": output_video,
+            "original_duration": f"{video_duration:.2f}s",
+            "output_duration": f"{total_output_duration:.2f}s",
+            "time_saved": f"{video_duration - total_output_duration:.2f}s",
+            "compression_ratio": f"{total_output_duration/video_duration:.1%}",
+            "output_srt": output_srt,
+            "total_elapsed": f"{total_elapsed:.2f}s",
+            "ffmpeg_time": f"{processing_time:.2f}s",
+            "speed": f"{total_output_duration/processing_time:.2f}x"
+        }
+        
+        logger(f"\n--- 任务完成 ---")
+        logger(f"最终视频: {os.path.basename(output_video)}")
+        logger(f"时间统计: 原始 {stats['original_duration']} -> 压缩后 {stats['output_duration']}")
+        logger(f"节省时长: {stats['time_saved']} (压缩率: {stats['compression_ratio']})")
+        logger(f"总处理耗时: {stats['total_elapsed']} (处理速度: {stats['speed']})")
+        return stats
     except subprocess.CalledProcessError as e:
-        print(f"\nFFmpeg 执行失败，返回码: {e.returncode}")
+        logger(f"\nFFmpeg 执行失败，返回码: {e.returncode}")
+        return None
     finally:
         if os.path.exists(concat_file):
             os.remove(concat_file)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="字幕驱动的视频对白提取工具")
-    
-    # 核心参数
     parser.add_argument("input", help="输入视频文件路径")
     parser.add_argument("--srt", help="输入字幕文件路径 (默认查找同名 .srt)")
     parser.add_argument("-o", "--output", help="输出视频文件名 (默认 output.mp4)")
     parser.add_argument("--output_srt", help="输出字幕文件名 (默认 output.srt)")
-    
-    # 功能开关
     parser.add_argument("--copy", action="store_true", help="使用无损拷贝模式 (速度极快但可能卡顿)")
     parser.add_argument("--no-gpu", action="store_false", dest="gpu", help="禁用 GPU 加速")
     parser.set_defaults(gpu=True)
-    
-    # 算法参数
     parser.add_argument("--padding", type=float, default=0.3, help="对白前后扩展时间 (秒, 默认 0.3)")
     parser.add_argument("--merge_gap", type=float, default=0.5, help="合并相邻片段的最大间隔 (秒, 默认 0.5)")
     parser.add_argument("--min_duration", type=float, default=0.5, help="最短字幕过滤阈值 (秒, 默认 0.5)")
-
-    # 质量与体积控制
     parser.add_argument("--crf", type=int, default=26, help="CPU 模式下的 CRF 质量参数 (18-28, 默认 26, 越大体积越小)")
     parser.add_argument("--cq", type=int, default=28, help="GPU 模式下的 CQ 质量参数 (默认 28, 越大体积越小)")
     parser.add_argument("--bitrate", help="目标视频比特率 (如 1M, 2M, 会覆盖 CRF/CQ)")
     parser.add_argument("--target-size", type=float, help="期望的最终视频文件大小 (MB, 会自动计算比特率)")
 
     args = parser.parse_args()
-
-    # 设置默认输出名
     if not args.output:
         args.output = "output.mp4"
     if not args.output_srt:
