@@ -13,8 +13,20 @@ def get_video_duration(video_path):
         'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
         '-of', 'default=noprint_wrappers=1:nokey=1', video_path
     ]
+    # 在 Windows 下隐藏控制台窗口
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        result = subprocess.run(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            text=True, 
+            check=True,
+            creationflags=creationflags
+        )
         return float(result.stdout.strip())
     except Exception as e:
         print(f"错误: 无法获取视频时长 {video_path}: {e}")
@@ -90,6 +102,11 @@ def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing", progress_ca
     # 强制 FFmpeg 将进度输出到 stdout
     cmd = cmd + ['-progress', '-', '-nostats']
     
+    # 在 Windows 下隐藏控制台窗口
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+
     # 统计信息
     start_time = time.time()
     
@@ -99,7 +116,8 @@ def run_ffmpeg_with_progress(cmd, total_duration, desc="Processing", progress_ca
         stderr=subprocess.STDOUT, 
         text=True, 
         encoding='utf-8',
-        errors='ignore'
+        errors='ignore',
+        creationflags=creationflags
     )
     
     last_time = 0.0

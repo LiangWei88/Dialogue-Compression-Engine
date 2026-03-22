@@ -16,6 +16,13 @@ output.mp4
 output.srt
 ffmpeg_concat.txt
 
+# PyInstaller / Build
+dist/
+build/
+*.spec
+*.exe
+
+
 # OS
 .DS_Store
 Thumbs.db

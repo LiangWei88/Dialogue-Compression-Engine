@@ -82,6 +82,46 @@ python main.py my_video.mp4 --no-gpu
 
 ---
 
+## 📦 下载与发布 (Portable Version)
+
+对于没有 Python 环境的用户，可以直接下载我们打包好的独立可执行文件：
+
+1. **获取程序**：前往 [GitHub Releases](https://github.com/YOUR_USERNAME/YOUR_REPO/releases) 下载最新的 `DialogueExtractor.exe`。
+2. **FFmpeg 依赖**：由于法律和体积原因，`.exe` 文件不包含 FFmpeg。
+   - 请确保您的电脑已安装 FFmpeg。
+   - **简易方案**：下载 FFmpeg 后，将 `ffmpeg.exe` 和 `ffprobe.exe` 放在与 `DialogueExtractor.exe` 相同的文件夹下即可直接运行。
+
+---
+
+## 🛠️ 开发者：如何打包 EXE
+
+如果您修改了代码并希望重新生成独立的可执行文件，推荐使用项目提供的脚本：
+
+1. **安装 PyInstaller**：
+   在虚拟环境中运行：
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **运行打包脚本**：
+   项目根目录下提供了 `build_exe.py`，它会自动定位 `customtkinter` 资源并完成打包：
+   ```bash
+   python build_exe.py
+   ```
+   该脚本会自动执行以下操作：
+   - `--onefile`: 打包为单个 EXE 文件。
+   - `--noconsole`: 运行时不显示黑色的命令行窗口。
+   - 自动包含 `customtkinter` 必要的资源文件。
+
+3. **获取产物**：
+   打包完成后，在项目目录下的 `dist/` 文件夹内即可找到 `DialogueExtractor.exe`。
+
+4. **注意事项**：
+   - 打包前请确保已安装 `customtkinter`, `pysrt`, `tqdm` 等所有依赖。
+   - 如果遇到权限错误（PermissionError），请检查是否已关闭正在运行的 `DialogueExtractor.exe` 旧版本。
+
+---
+
 ## ⚙️ 参数说明
 
 | 界面参数名 | CLI 命令行参数 | 默认值 | 说明 |
