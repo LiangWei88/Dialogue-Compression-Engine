@@ -29,8 +29,6 @@ class App(ctk.CTk):
         # 窗口设置
         self.title("Subtitle-driven Video Extractor")
         self.geometry("1100x900")
-        # 默认最大化
-        self.after(0, lambda: self.state('zoomed'))
         
         ctk.set_appearance_mode("light")
         self.configure(fg_color=COLORS["bg"])
