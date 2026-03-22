@@ -114,9 +114,23 @@ class App(ctk.CTk):
         bottom_container.pack(pady=20, padx=40, fill="x")
 
         # 进度条
-        self.progress_bar = ctk.CTkProgressBar(bottom_container, progress_color=COLORS["secondary"], height=25)
+        progress_label_frame = ctk.CTkFrame(bottom_container, fg_color="transparent")
+        progress_label_frame.pack(fill="x", anchor="w")
+        
+        ctk.CTkLabel(progress_label_frame, text="处理进度", font=FONT_LABEL).pack(side="left")
+        self.percentage_label = ctk.CTkLabel(progress_label_frame, text="0%", font=FONT_MAIN, text_color=COLORS["secondary"])
+        self.percentage_label.pack(side="right")
+
+        self.progress_bar = ctk.CTkProgressBar(
+            bottom_container, 
+            progress_color=COLORS["secondary"], 
+            fg_color="#E0E0E0", 
+            height=25,
+            border_width=1,
+            border_color="#D0D0D0"
+        )
         self.progress_bar.set(0)
-        self.progress_bar.pack(fill="x", pady=10)
+        self.progress_bar.pack(fill="x", pady=(5, 10))
         
         self.status_label = ctk.CTkLabel(bottom_container, text="就绪", font=FONT_MAIN, text_color=COLORS["text"])
         self.status_label.pack(pady=(0, 20))
@@ -133,9 +147,19 @@ class App(ctk.CTk):
         
         s_row = ctk.CTkFrame(f, fg_color="transparent")
         s_row.pack(fill="x", pady=2)
-        s = ctk.CTkSlider(s_row, from_=start, to=end, variable=var, button_color=COLORS["primary"], progress_color=COLORS["secondary"])
+        
+        # 显示数值的标签，固定宽度防止抖动
+        val_label = ctk.CTkLabel(s_row, text=f"{var.get():.1f}", width=60, font=FONT_MAIN)
+        
+        def _on_slider_move(value):
+            var.set(round(value, 1))
+            val_label.configure(text=f"{var.get():.1f}")
+
+        s = ctk.CTkSlider(s_row, from_=start, to=end, variable=var, 
+                          button_color=COLORS["primary"], progress_color=COLORS["secondary"],
+                          command=_on_slider_move)
         s.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(s_row, textvariable=var, width=60, font=FONT_MAIN).pack(side="right", padx=(10, 0))
+        val_label.pack(side="right", padx=(10, 0))
 
     def _browse_video(self):
         p = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.webm *.mkv *.mov *.avi *.flv *.ts")])
@@ -158,6 +182,7 @@ class App(ctk.CTk):
     def _update_progress(self, curr, total, desc):
         percent = curr / total if total > 0 else 0
         self.progress_bar.set(percent)
+        self.percentage_label.configure(text=f"{percent:.1%}")
         self.status_label.configure(text=f"{desc}: {percent:.1%}")
 
     def _start_task(self):
@@ -167,7 +192,10 @@ class App(ctk.CTk):
         
         self.run_btn.configure(state="disabled", text="正在全力处理中...")
         self.log_text.delete("1.0", "end")
+        
+        # 初始化进度条
         self.progress_bar.set(0)
+        self.percentage_label.configure(text="0%")
         self._log("任务启动...")
         
         class Args:
