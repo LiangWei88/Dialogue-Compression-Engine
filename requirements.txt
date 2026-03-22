@@ -1,0 +1,4 @@
+pysrt
+customtkinter
+tqdm
+# 如果需要打包或处理其他依赖可以自行添加
